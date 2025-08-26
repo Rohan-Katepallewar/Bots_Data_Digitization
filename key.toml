@@ -1,0 +1,7 @@
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project"
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "sheets-writer@your-project.iam.gserviceaccount.com"
+token_uri = "https://oauth2.googleapis.com/token"
