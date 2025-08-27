@@ -50,6 +50,8 @@ Return ONLY a single JSON object with these keys exactly:
   "students": [
     {
       "name": "", "caregiverName": "", "phone": "", "grade": "",
+      "baselineMarks": {"None":false,"Addition":false,"Subtraction":false,"Multiplication":false,"Division":false},
+      "endlineMarks":  {"None":false,"Addition":false,"Subtraction":false,"Multiplication":false,"Division":false},
       "baselineOp": "",
       "sessions": [
         {"session":"Lesson 1","datetime":"","currentTopic":"","checkpointCorrect":"","nextTopic":""},
@@ -67,20 +69,16 @@ Return ONLY a single JSON object with these keys exactly:
 }
 
 Rules:
-- Teacher/School: read from the header area.
-- Extract EACH visible student block: name, caregiver (if present), phone (digits-only), grade.
-- BaselineOp & EndlineOp: choose the option that is CIRCLED or TICK-MARKED (ignore adjacent handwriting).
-  Valid values ONLY: "None", "Addition", "Subtraction", "Multiplication", "Division". If nothing clear, use "".
-- Sessions (3 rows): For each row:
-  - session: "Lesson 1" .. "Lesson 3" (row order).
-  - datetime: "DD/MM/YY HH:mm" (24h). If only date or time is present, include the available part.
-  - currentTopic: copy what’s written (e.g., D or M).
-  - checkpointCorrect: "Yes" if explicitly marked correct, "No" if marked incorrect, else "".
-  - nextTopic: copy what’s written.
-- Phones: digits only (strip spaces, dashes, country codes). No fixed length.
-- Footer table: extract the numbers for Lesson 1–3 (total students, successfully reached).
+- Teacher/School: read from the header.
+- For EACH visible student block: name, caregiver (if present), phone (digits-only), grade.
+- baselineMarks & endlineMarks: set **true ONLY** for the option that is clearly **circled or tick-marked**. If none/unclear, all false. Ignore any nearby handwriting.
+- baselineOp & endlineOp: may repeat the chosen option; if none chosen, leave "".
+  Valid values ONLY: "None","Addition","Subtraction","Multiplication","Division".
+- Sessions (3 rows): same as before…
+- Footer: same as before…
+- Phones: digits only. No fixed length.
 - If a field is empty or illegible, output "".
-- Output must be VALID JSON and contain ONLY the JSON object.
+- Output must be **valid JSON** and nothing else.
 """
 
 # ---------- Helpers ----------
@@ -133,44 +131,61 @@ ROW_COLUMNS = [
     "studentName","caregiverName","phone","grade",
     "baselineOp","session","datetime","currentTopic","checkpointCorrect","nextTopic","endlineOp"
 ]
+ALLOWED_OPS = ["None","Addition","Subtraction","Multiplication","Division"]
+
+def pick_from_marks(m: dict) -> str:
+    """Return the option only if exactly one is True, else empty string."""
+    if not isinstance(m, dict):
+        return ""
+    trues = [k for k, v in m.items() if isinstance(v, bool) and v]
+    return trues[0] if len(trues) == 1 else ""
 
 def flatten_rows(obj: Dict[str, Any], file_name: str) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
-    teacher = obj.get("teacherName","") or ""
-    school  = obj.get("schoolName","") or ""
-    students = obj.get("students",[]) or []
+    teacher = obj.get("teacherName", "") or ""
+    school  = obj.get("schoolName", "") or ""
+    students = obj.get("students", []) or []
+
     for s in students:
+        # derive baseline/endline from marks
+        derived_baseline = pick_from_marks(s.get("baselineMarks", {}))
+        derived_endline  = pick_from_marks(s.get("endlineMarks", {}))
+
+        # safe fallback to model's strings only if allowed
+        baseline_op = derived_baseline or (s.get("baselineOp", "") if s.get("baselineOp", "") in ALLOWED_OPS else "")
+        endline_op  = derived_endline  or (s.get("endlineOp", "") if s.get("endlineOp", "") in ALLOWED_OPS else "")
+
         base = {
             "fileName": file_name,
             "teacherName": teacher,
             "schoolName": school,
-            "studentName": s.get("name","") or "",
-            "caregiverName": s.get("caregiverName","") or "",
-            "phone": "".join(ch for ch in (s.get("phone","") or "") if ch.isdigit()),
-            "grade": s.get("grade","") or "",
-            "baselineOp": s.get("baselineOp","") or "",
-            "endlineOp": s.get("endlineOp","") or "",
+            "studentName": s.get("name", "") or "",
+            "caregiverName": s.get("caregiverName", "") or "",
+            "phone": "".join(ch for ch in (s.get("phone", "") or "") if ch.isdigit()),
+            "grade": s.get("grade", "") or "",
+            "baselineOp": baseline_op,
+            "endlineOp": endline_op,
         }
-        sessions = s.get("sessions",[]) or []
+
+        sessions = s.get("sessions", []) or []
         wrote = False
         for idx, sess in enumerate(sessions, start=1):
             if not any((sess.get("datetime"), sess.get("currentTopic"), sess.get("checkpointCorrect"), sess.get("nextTopic"))):
                 continue
             row = {**base,
                    "session": f"Lesson {idx}",
-                   "datetime": sess.get("datetime","") or "",
-                   "currentTopic": sess.get("currentTopic","") or "",
-                   "checkpointCorrect": sess.get("checkpointCorrect","") or "",
-                   "nextTopic": sess.get("nextTopic","") or ""}
+                   "datetime": sess.get("datetime", "") or "",
+                   "currentTopic": sess.get("currentTopic", "") or "",
+                   "checkpointCorrect": sess.get("checkpointCorrect", "") or "",
+                   "nextTopic": sess.get("nextTopic", "") or ""}
             rows.append(row)
             wrote = True
         if not wrote:
-            row = {**base,"session":"","datetime":"","currentTopic":"","checkpointCorrect":"","nextTopic":""}
-            rows.append(row)
-    # order columns
+            rows.append({**base, "session":"", "datetime":"", "currentTopic":"", "checkpointCorrect":"", "nextTopic":""})
+    # order columns as before…
     for r in rows:
         for col in ROW_COLUMNS:
-            r.setdefault(col,"")
+            r.setdefault(col, "")
     return rows
 
 def footer_to_df(obj: Dict[str, Any], file_name: str) -> pd.DataFrame:
